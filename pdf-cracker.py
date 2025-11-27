@@ -1,39 +1,19 @@
 """
-Author: Davood Yahay
-Website: https://davoodya.ir
-GitHub: https://github.com/davoodya/Yakuza_Malwares_Arsenal/pdf-cracker
-Start Date: 27 November(11) 2025 | 6 Azar(9) 1404
-End Date:
+OCR + Searchable PDF + DOCX generator (uses tesseract CLI via subprocess)
 
-- Brief Description: OCR + Searchable PDF + DOCX generator
-- Converts multi-page image-based PDF to:
-  1) Searchable PDF (output_searchable.pdf)
-  2) DOCX with page images + extracted text (output.docx)
-  3) Optional plain text (output.txt)
-
-- Functionality: PDF-Cracker Using for:
-1. Scan a Locked and Not Editable PDF Document
-2. Convert each page to an Image
-3. Run OCR on All Images Pages
-4. Split Text Image and Describe Image
-5. Store New Editable PDF Document + Word(DOCX) + TEXT Version of Original PDF
-
-- Requirements:
-  - Tesseract OCR installed (https://github.com/tesseract-ocr/tesseract)
-  - pip install pdf2image pytesseract python-docx pillow opencv-python
-
-
-- TODO:
-
+Requirements:
+ - Tesseract OCR installed and available (set TESSERACT_CMD if not in PATH)
+ - poppler (for pdf2image)
+ - pip install pdf2image python-docx pillow opencv-python pypdf
 """
 
 import os
+import subprocess
 from pathlib import Path
 from pdf2image import convert_from_path
-import pytesseract
-from pytesseract import Output
 from PIL import Image
 import cv2
+import numpy as np
 from docx import Document
 from docx.shared import Inches
 
@@ -44,12 +24,23 @@ DPI = 300
 LANG = "eng"      # change to "fas" or "eng+fas" if you have Persian trained data
 USE_DESKEW = True
 POPPLER_PATH = r"H:\Repo\LittleApps\Materials\poppler\Library\bin"
-#TESSERACT_CMD = r"H:\Repo\LittleApps\Materials\Tesseract-OCR\tesseract\tesseract.exe"
-TESSERACT_CMD = None # if in PATH so None or  # e.g. r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# If tesseract executable is not in PATH, set full path, otherwise leave as "tesseract"
+TESSERACT_CMD = None  # e.g. r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Optional tesseract config flags:
+TESSERACT_OEM = "3"
+TESSERACT_PSM = "3"
 # ----------------------------
 
-if TESSERACT_CMD:
-    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+tesseract_exe = TESSERACT_CMD or "tesseract"
+
+# check tesseract existence
+def check_tesseract():
+    try:
+        subprocess.run([tesseract_exe, "--version"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        raise RuntimeError(f"Cannot run tesseract executable '{tesseract_exe}'. Ensure tesseract is installed and path is correct. Error: {e}")
+
+check_tesseract()
 
 work_dir = Path("ocr_temp")
 work_dir.mkdir(exist_ok=True)
@@ -80,79 +71,116 @@ def preprocess_image(pil_image):
             th = rotated
     return Image.fromarray(th)
 
-# import numpy after function to keep top imports minimal
-import numpy as np
-
-# Convert PDF to images
 print("Converting PDF to images...")
 pages = convert_from_path(PDF_INPUT, dpi=DPI, poppler_path=POPPLER_PATH)
 
 doc = Document()
 all_texts = []
 
-searchable_pdf_bytes = []
-
-# We'll build a searchable PDF by letting tesseract output PDF for each page,
-# then combine bytes of pages into final PDF.
-# pytesseract.image_to_pdf_or_hocr returns PDF bytes if extension='pdf'
-pdf_pages_bytes = []
+# store per-page pdf paths for merging
+page_pdf_paths = []
 
 for i, page in enumerate(pages, start=1):
     print(f"Processing page {i}/{len(pages)}...")
-    # optional preprocessing
     proc_img = preprocess_image(page)
 
-    # Save preprocessed image (optional)
     img_path = work_dir / f"page_{i:03d}.png"
     proc_img.save(img_path)
 
-    # OCR text extraction
-    custom_config = r'--oem 3 --psm 3'  # adjust psm for whole page; psm 1..13 options
-    text = pytesseract.image_to_string(proc_img, lang=LANG, config=custom_config)
-    text = text.strip()
+    # prepare base output name (without extension) for tesseract
+    out_base = str(work_dir / f"page_{i:03d}")
+
+    # 1) Run tesseract to produce a plain text file (out_base.txt)
+    txt_cmd = [
+        tesseract_exe,
+        str(img_path),
+        out_base,                 # tesseract will add .txt automatically
+        "-l", LANG,
+        "--oem", TESSERACT_OEM,
+        "--psm", TESSERACT_PSM,
+        "txt"
+    ]
+
+    # Note: some tesseract builds accept 'txt' implicitly; including it for clarity.
+    try:
+        subprocess.run(txt_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: tesseract returned non-zero for text on page {i}: {e}")
+    except FileNotFoundError:
+        raise RuntimeError(f"Tesseract executable not found: {tesseract_exe}")
+
+    # read produced text (if any)
+    page_txt_path = Path(out_base + ".txt")
+    if page_txt_path.exists():
+        text = page_txt_path.read_text(encoding="utf-8", errors="ignore").strip()
+    else:
+        text = ""
     all_texts.append(text)
 
-    # Create page-level searchable PDF bytes
-    pdf_bytes = pytesseract.image_to_pdf_or_hocr(proc_img, lang=LANG, extension='pdf')
-    pdf_pages_bytes.append(pdf_bytes)
+    # 2) Run tesseract to produce a searchable PDF for this page (out_base.pdf)
+    pdf_cmd = [
+        tesseract_exe,
+        str(img_path),
+        out_base,
+        "-l", LANG,
+        "--oem", TESSERACT_OEM,
+        "--psm", TESSERACT_PSM,
+        "pdf"
+    ]
+    try:
+        subprocess.run(pdf_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: tesseract returned non-zero for pdf on page {i}: {e}")
 
-    # Add to DOCX: image + text
+    page_pdf = Path(out_base + ".pdf")
+    if page_pdf.exists():
+        page_pdf_paths.append(page_pdf)
+    else:
+        print(f"Warning: expected PDF not found for page {i}: {page_pdf}")
+
+    # Add to DOCX: page header, image, then text
     doc.add_paragraph(f"--- Page {i} ---")
-    # insert image (scale to page width; adjust Inches as needed)
-    doc.add_picture(str(img_path), width=Inches(6))
+    # Insert scaled image; adjust width if needed
+    try:
+        doc.add_picture(str(img_path), width=Inches(6))
+    except Exception as e:
+        print(f"Warning: couldn't insert image into docx for page {i}: {e}")
     doc.add_paragraph("")  # spacer
     doc.add_paragraph(text)
 
-# Combine per-page PDF bytes into a single searchable PDF file
-# Simple method: write bytes sequentially — but PDF merging requires a proper merger.
-# Use pypdf to merge page PDFs reliably.
+# Merge per-page PDFs into a single searchable PDF
+out_pdf_path = Path(f"{OUT_PREFIX}_searchable.pdf")
 try:
-    from pypdf import PdfMerger
-except Exception:
-    from PyPDF2 import PdfFileMerger as PdfMerger
-
-merger = PdfMerger()
-for idx, pb in enumerate(pdf_pages_bytes):
-    tmp_pdf = work_dir / f"_tmp_page_{idx}.pdf"
-    tmp_pdf.write_bytes(pb)
-    merger.append(str(tmp_pdf))
-
-out_pdf_path = f"{OUT_PREFIX}_searchable.pdf"
-merger.write(out_pdf_path)
-merger.close()
+    try:
+        from pypdf import PdfMerger
+        merger = PdfMerger()
+    except Exception:
+        # fallback to PyPDF2's merger name differences
+        from PyPDF2 import PdfFileMerger as PdfMerger
+        merger = PdfMerger()
+    for p in page_pdf_paths:
+        merger.append(str(p))
+    merger.write(str(out_pdf_path))
+    merger.close()
+except Exception as e:
+    print(f"Warning: failed to merge PDFs: {e}")
+    # As fallback, if only one page_pdf exists, copy it
+    if len(page_pdf_paths) == 1:
+        out_pdf_path = Path(f"{OUT_PREFIX}_searchable.pdf")
+        page_pdf_paths[0].replace(out_pdf_path)
+        print(f"Single-page PDF moved to {out_pdf_path}")
 
 # Save DOCX
-out_docx_path = f"{OUT_PREFIX}.docx"
-doc.save(out_docx_path)
+out_docx_path = Path(f"{OUT_PREFIX}.docx")
+doc.save(str(out_docx_path))
 
-# Save plain text as well
-out_txt_path = f"{OUT_PREFIX}.txt"
-with open(out_txt_path, "w", encoding="utf-8") as f:
+# Save plain text as well (all pages concatenated)
+out_txt_path = Path(f"{OUT_PREFIX}.txt")
+with out_txt_path.open("w", encoding="utf-8") as f:
     f.write("\n\n==== PAGE BREAK ==== \n\n".join(all_texts))
 
 print("Done!")
 print(f"Searchable PDF: {out_pdf_path}")
 print(f"DOCX (editable): {out_docx_path}")
 print(f"Plain text: {out_txt_path}")
-print(f"Temp images in: {work_dir}")
-
+print(f"Temp files in: {work_dir}")
