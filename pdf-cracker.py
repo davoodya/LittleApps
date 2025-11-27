@@ -24,6 +24,7 @@ from docx.shared import Inches
 import shutil
 import glob
 import sys
+import shutil
 
 # ---------- Get PDF Path from user ----------
 while True:
@@ -316,3 +317,99 @@ print(f"Plain text: {out_txt_path.resolve() if out_txt_path.exists() else 'NOT_C
 print(f"Pages folder (renamed): {new_dir_path.resolve() if new_dir_path.exists() else work_dir.resolve()}")
 if 'archive_path' in locals():
     print(f"ZIP: {Path(archive_path).resolve()}")
+
+
+# -------------------------
+# Rename outputs to use input PDF stem and optionally remove pages folder after zipping
+# Append this to the end of your script (after creating the ZIP archive)
+# -------------------------
+from pathlib import Path
+import shutil
+
+# determine pdf_stem (if not already set)
+try:
+    pdf_stem
+except NameError:
+    pdf_stem = Path(PDF_INPUT).stem
+
+# current output paths (these variables may already exist in your script)
+# if they don't exist, we construct their expected paths
+out_txt_path = Path(f"{OUT_PREFIX}.txt") if 'out_txt_path' not in globals() else Path(out_txt_path)
+out_docx_path = Path(f"{OUT_PREFIX}.docx") if 'out_docx_path' not in globals() else Path(out_docx_path)
+out_pdf_path = Path(f"{OUT_PREFIX}_searchable.pdf") if 'out_pdf_path' not in globals() else Path(out_pdf_path)
+
+# desired new names
+new_txt = Path(f"{pdf_stem}.txt")
+new_docx = Path(f"{pdf_stem}.docx")
+new_pdf = Path(f"{pdf_stem}_searchable.pdf")
+
+def safe_replace(src: Path, dst: Path):
+    """Move src -> dst. If dst exists, remove it first. If src missing, warn."""
+    if not src.exists():
+        print(f"[rename] Source not found, skipping: {src}")
+        return False
+    if dst.exists():
+        try:
+            dst.unlink() if dst.is_file() else shutil.rmtree(dst)
+            print(f"[rename] Removed existing target: {dst}")
+        except Exception as e:
+            print(f"[rename] Failed to remove existing target {dst}: {e}")
+            return False
+    try:
+        src.replace(dst)
+        print(f"[rename] Renamed {src} -> {dst}")
+        return True
+    except Exception as e:
+        print(f"[rename] Failed to rename {src} -> {dst}: {e}")
+        return False
+
+# Rename outputs (if they exist)
+safe_replace(out_txt_path, new_txt)
+safe_replace(out_docx_path, new_docx)
+safe_replace(out_pdf_path, new_pdf)
+
+# Ensure ZIP exists (create if not)
+zip_name = f"{pdf_stem}_pages.zip"
+zip_path = Path(zip_name)
+# new_dir_path should point to the folder containing page files; if not defined, derive it
+try:
+    pages_dir = new_dir_path
+except NameError:
+    pages_dir = Path(f"{pdf_stem}_pages")
+
+if not zip_path.exists():
+    if pages_dir.exists():
+        try:
+            archive_path = shutil.make_archive(str(pages_dir), 'zip', root_dir=pages_dir)
+            print(f"[zip] Created zip: {archive_path}")
+            zip_path = Path(archive_path)
+        except Exception as e:
+            print(f"[zip] Failed to create zip from {pages_dir}: {e}")
+    else:
+        print(f"[zip] Pages folder not found, cannot create zip: {pages_dir}")
+else:
+    print(f"[zip] ZIP already exists: {zip_path}")
+
+# If ZIP successfully created (or already existed), remove the pages directory
+if zip_path.exists():
+    if pages_dir.exists():
+        try:
+            shutil.rmtree(pages_dir)
+            print(f"[cleanup] Removed pages directory: {pages_dir}")
+        except Exception as e:
+            print(f"[cleanup] Failed to remove pages directory {pages_dir}: {e}")
+    else:
+        print(f"[cleanup] Pages directory already missing: {pages_dir}")
+else:
+    print(f"[cleanup] ZIP not found; skipping removal of pages directory.")
+
+# Update printed summary variables (optional)
+final_txt = new_txt if new_txt.exists() else out_txt_path
+final_docx = new_docx if new_docx.exists() else out_docx_path
+final_pdf = new_pdf if new_pdf.exists() else out_pdf_path
+
+print("\nFinal files:")
+print(f"Text: {final_txt.resolve() if final_txt.exists() else 'NOT_CREATED'}")
+print(f"DOCX: {final_docx.resolve() if final_docx.exists() else 'NOT_CREATED'}")
+print(f"Searchable PDF: {final_pdf.resolve() if final_pdf.exists() else 'NOT_CREATED'}")
+print(f"ZIP: {zip_path.resolve() if zip_path.exists() else 'NOT_CREATED'}")
