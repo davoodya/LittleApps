@@ -17,8 +17,20 @@ import numpy as np
 from docx import Document
 from docx.shared import Inches
 
+# ---------- PDF File Input ----------
+from pathlib import Path
+import os
+
+while True:
+    path_input = input("Please Enter PDF Path: ").strip()
+    PDF_INPUT = Path(path_input)
+
+    if PDF_INPUT.exists():
+        break
+    else:
+        print("[x] PDF Not Found, Enter Correct Path Please.")
+
 # ---------- CONFIG ----------
-PDF_INPUT = r"H:\test\DataRemoval.pdf"
 OUT_PREFIX = "output"
 DPI = 300
 LANG = "eng"      # change to "fas" or "eng+fas" if you have Persian trained data
