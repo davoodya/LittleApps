@@ -38,12 +38,14 @@ from docx import Document
 from docx.shared import Inches
 
 # ---------- CONFIG ----------
-PDF_INPUT = "input.pdf"
+PDF_INPUT = "H:\test\DataRemoval.pdf"
 OUT_PREFIX = "output"
 DPI = 300
-LANG = "eng"      # change to "fas" or "eng+fas" if you have Persian traineddata
-TESSERACT_CMD = None  # e.g. r"C:\Program Files\Tesseract-OCR\tesseract.exe" or None if in PATH
+LANG = "eng"      # change to "fas" or "eng+fas" if you have Persian trained data
 USE_DESKEW = True
+POPPLER_PATH = r"H:\Repo\LittleApps\Materials\poppler\Library\bin"
+TESSERACT_CMD = r"H:\Repo\LittleApps\Materials\Tesseract-OCR\tesseract\tesseract.exe"
+# TESSERACT_CMD = None if in PATH or  # e.g. r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 # ----------------------------
 
 if TESSERACT_CMD:
@@ -83,7 +85,7 @@ import numpy as np
 
 # Convert PDF to images
 print("Converting PDF to images...")
-pages = convert_from_path(PDF_INPUT, dpi=DPI)
+pages = convert_from_path(PDF_INPUT, dpi=DPI, poppler_path=POPPLER_PATH)
 
 doc = Document()
 all_texts = []
